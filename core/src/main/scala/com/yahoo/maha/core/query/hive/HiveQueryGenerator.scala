@@ -2,6 +2,7 @@
 // Licensed under the terms of the Apache License 2.0. Please see LICENSE file in project root for terms.
 package com.yahoo.maha.core.query.hive
 
+import com.yahoo.maha.core.HiveExpression.UDFHiveExpression
 import com.yahoo.maha.core._
 import com.yahoo.maha.core.dimension._
 import com.yahoo.maha.core.fact.{DerivedFactColumn, _}
@@ -24,8 +25,8 @@ class HiveQueryGenerator(partitionColumnRenderer:PartitionColumnRenderer, udfSta
       case FactQueryContext(factBestCandidate, model, indexAliasOption, attributes) =>
         generateQuery(CombinedQueryContext(SortedSet.empty, factBestCandidate, model, attributes))
       case DimFactOuterGroupByQueryQueryContext(dims, factBestCandidate, model, attributes) =>
-        generateQuery(CombinedQueryContext(dims, factBestCandidate, model, attributes))
-        //generateOuterGroupByQuery(CombinedQueryContext(dims, factBestCandidate, model, attributes))
+        //generateQuery(CombinedQueryContext(dims, factBestCandidate, model, attributes))
+        generateOuterGroupByQuery(CombinedQueryContext(dims, factBestCandidate, model, attributes))
       case any => throw new UnsupportedOperationException(s"query context not supported : $any")
     }
   }
@@ -34,7 +35,7 @@ class HiveQueryGenerator(partitionColumnRenderer:PartitionColumnRenderer, udfSta
     requestModel.orFilterMeta.isEmpty
   }
 
- /* private[this] def generateOuterGroupByQuery(queryContext: CombinedQueryContext) : Query = {
+ private[this] def generateOuterGroupByQuery(queryContext: CombinedQueryContext) : Query = {
 
     val queryBuilderContext = new QueryBuilderContext
     val queryBuilder: QueryBuilder = new QueryBuilder(
@@ -54,11 +55,14 @@ class HiveQueryGenerator(partitionColumnRenderer:PartitionColumnRenderer, udfSta
       def renderFactCol(alias: String, finalAliasOrExpression: String, col: Column, finalAlias: String): String = {
         val finalExp = {
           if (col.isInstanceOf[FactColumn] && col.isDerivedColumn) {
-            val rollupExpression = col.asInstanceOf[DerivedFactColumn].rollupExpression
-            if (rollupExpression.equals(NoopRollup) && columnNamesInOuterGroupBy.contains(finalAlias)) {
+            val fAlias = renderColumnAlias(alias)
+            if (columnNamesInOuterGroupBy.contains(fAlias)) {
               finalAlias
             } else {
-              val renderedDerived = col.asInstanceOf[DerivedFactColumn].derivedExpression.render(finalAlias, queryBuilderContext.getColAliasToFactColNameMap).toString
+              val renderedDerived = col.asInstanceOf[DerivedFactColumn].derivedExpression.render(fAlias,
+                queryBuilderContext.getColAliasToFactColNameMap,
+                expandDerivedExpression = false,
+                insideDerived = true).toString
               renderedDerived
             }
           } else {
@@ -161,11 +165,17 @@ class HiveQueryGenerator(partitionColumnRenderer:PartitionColumnRenderer, udfSta
       }
 
       def addDerivedFactColOuterGroupBy(alias: String, col: FactColumn): Unit = {
-        if (col.asInstanceOf[DerivedFactColumn].derivedExpression.expression.hasRollupExpression) {
-          // This is a derived column with aggregate expression (eg UDAF)
+        val expression = col.asInstanceOf[DerivedFactColumn].derivedExpression.expression
+        if (expression.hasRollupExpression) { // Rollup expressions should be rendered in outergroupby
           renderColumnWithAlias(fact, col, alias, Set.empty, false)
           val finalAlias = renderColumnAlias(col.name)
-          val renderedDerived = s"${queryBuilderContext.getFactColExpressionOrNameForAlias(alias)} $finalAlias"
+          val renderedDerived = {
+            if (expression.isInstanceOf[UDFHiveExpression] && expression.asInstanceOf[UDFHiveExpression].performsAggregation) {
+              s"${queryBuilderContext.getFactColExpressionOrNameForAlias(alias)} $finalAlias"
+            } else {
+              s"SUM(${queryBuilderContext.getFactColExpressionOrNameForAlias(alias)}) $finalAlias"
+            }
+          }
           columnsForGroupBySelect.add(renderedDerived)
           columnNamesInOuterGroupBy += finalAlias
         } else {
@@ -178,14 +188,14 @@ class HiveQueryGenerator(partitionColumnRenderer:PartitionColumnRenderer, udfSta
               case f: FactColumn =>
                 val rollupExpression = sourceCol.asInstanceOf[FactColumn].rollupExpression
                 if (sourceCol.isDerivedColumn) {
+                  val finalAlias = renderColumnAlias(sourceCol.name)
                   if (rollupExpression.equals(NoopRollup)) { // Noop rollups should be expanded in outergroupby clause
                     renderColumnWithAlias(fact, sourceCol, alias, Set.empty, false)
-                    val finalAlias = renderColumnAlias(sourceCol.name)
                     val renderedDerived = s"${queryBuilderContext.getFactColExpressionOrNameForAlias(alias)} $finalAlias"
                     columnsForGroupBySelect.add(renderedDerived)
                     columnNamesInOuterGroupBy += finalAlias
                   } else {
-                    addDerivedFactColOuterGroupBy(alias, sourceCol.asInstanceOf[DerivedFactColumn])
+                    addDerivedFactColOuterGroupBy(sourceCol.name, sourceCol.asInstanceOf[DerivedFactColumn])
                   }
                 } else {
                   val finalAlias = colName
@@ -282,7 +292,8 @@ class HiveQueryGenerator(partitionColumnRenderer:PartitionColumnRenderer, udfSta
             case _ => //do nothing if we reference ourselves
           }
           //val renderedAlias = renderColumnAlias(alias)
-          val renderedAlias = if (!renderOuterColumn) renderColumnAlias(name) else renderColumnAlias(alias)
+          //val renderedAlias = if (!renderOuterColumn) renderColumnAlias(name) else renderColumnAlias(alias)
+          val renderedAlias = renderColumnAlias(alias)
           queryBuilderContext.setFactColAliasAndExpression(alias, renderedAlias, column, Option(s"""(${de.render(renderedAlias, queryBuilderContext.getColAliasToFactColNameMap, expandDerivedExpression = true)})"""))
           ""
       }
@@ -333,7 +344,6 @@ class HiveQueryGenerator(partitionColumnRenderer:PartitionColumnRenderer, udfSta
       IndexedSeq.empty
     )
   }
-*/
 
   private[this] def generateQuery(queryContext: CombinedQueryContext) : Query = {
 
