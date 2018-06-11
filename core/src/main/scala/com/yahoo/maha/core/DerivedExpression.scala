@@ -205,6 +205,7 @@ object HiveExpression {
   }
 
   abstract class UDFHiveExpression(val udfRegistration: UDFRegistration)(implicit uDFRegistrationFactory: UDFRegistrationFactory) extends BaseHiveExpression {
+    def performsAggregation = false
     override def isUDF: Boolean = true
     require(uDFRegistrationFactory.defaultUDFStatements.contains(udfRegistration), s"UDFHiveExpression ${getClass} is not registered in the UDFRegistrationFactory")
   }
