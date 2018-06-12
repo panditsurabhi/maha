@@ -55,13 +55,15 @@ class HiveQueryGenerator(partitionColumnRenderer:PartitionColumnRenderer, udfSta
       def renderFactCol(alias: String, finalAliasOrExpression: String, col: Column, finalAlias: String): String = {
         val finalExp = {
           if (col.isInstanceOf[FactColumn] && col.isDerivedColumn) {
+            val derivedFactColumn = col.asInstanceOf[DerivedFactColumn]
             val fAlias = renderColumnAlias(alias)
             if (columnNamesInOuterGroupBy.contains(fAlias)) {
               finalAlias
             } else {
-              val renderedDerived = col.asInstanceOf[DerivedFactColumn].derivedExpression.render(fAlias,
+              val needsExpansion:Boolean = !derivedFactColumn.derivedExpression.sourceColumns.subsetOf(columnNamesInOuterGroupBy)
+              val renderedDerived = derivedFactColumn.derivedExpression.render(fAlias,
                 queryBuilderContext.getColAliasToFactColNameMap,
-                expandDerivedExpression = false,
+                expandDerivedExpression = needsExpansion,
                 insideDerived = true).toString
               renderedDerived
             }
