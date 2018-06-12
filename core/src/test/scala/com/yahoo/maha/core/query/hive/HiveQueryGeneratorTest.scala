@@ -910,7 +910,7 @@ class HiveQueryGeneratorTest extends BaseHiveQueryGeneratorTest {
     val result = generateHiveQuery(jsonString)
     val expected = s"""SELECT CONCAT_WS(",",NVL(mang_campaign_name, ''), NVL(mang_advertiser_currency, ''), NVL(mang_average_cpc_cents, ''), NVL(mang_average_cpc, ''), NVL(mang_spend, ''))
       |FROM(
-      |SELECT getCsvEscapedString(CAST(NVL(outergroupby.mang_campaign_name, '') AS STRING)) mang_campaign_name, COALESCE(outergroupby.mang_advertiser_currency, "NA") mang_advertiser_currency, CAST(ROUND(COALESCE((CASE WHEN clicks = 0 THEN 0.0 ELSE spend / clicks END) * 100, 0L), 10) as STRING) mang_average_cpc_cents, CAST(ROUND(COALESCE(CASE WHEN clicks = 0 THEN 0.0 ELSE spend / clicks END, 0L), 10) as STRING) mang_average_cpc, CAST(ROUND(COALESCE(spend, 0.0), 10) as STRING) mang_spend
+      |SELECT getCsvEscapedString(CAST(NVL(outergroupby.mang_campaign_name, '') AS STRING)) mang_campaign_name, COALESCE(outergroupby.mang_advertiser_currency, "NA") mang_advertiser_currency, CAST(ROUND(COALESCE(((CASE WHEN clicks = 0 THEN 0.0 ELSE spend / clicks END) * 100), 0L), 10) as STRING) mang_average_cpc_cents, CAST(ROUND(COALESCE((CASE WHEN clicks = 0 THEN 0.0 ELSE spend / clicks END), 0L), 10) as STRING) mang_average_cpc, CAST(ROUND(COALESCE(spend, 0.0), 10) as STRING) mang_spend
       |FROM(
       |SELECT c2.mang_campaign_name,a1.mang_advertiser_currency,SUM(clicks) clicks,SUM(spend) spend
       |FROM(SELECT advertiser_id, campaign_id, SUM(spend) spend, SUM(clicks) clicks
