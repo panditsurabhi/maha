@@ -1422,6 +1422,128 @@ GROUP BY a2.mang_ad_status,c1.mang_campaign_name,af0.campaign_id) outergroupby
     //result should equal(expected)(after being whiteSpaceNormalised)
   }
 
+  val salesToolStats = s"""{
+    "cube": "sales_tools_stats",
+    "displayName": null,
+    "schema": "default",
+    "requestType": "AsyncRequest",
+    "forceDimDriven": false,
+    "fields": [
+        {
+            "field": "Day",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Advertiser ID",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Average Position",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Clicks",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Impressions",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Spend",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Total Conversions",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Advertiser Timezone",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Advertiser Currency",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Advertiser Name",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Average CPC",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Average CPM",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Average Cost-per-install",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Agency Name",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "MDM Name",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Ad Group Name",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Campaign Name",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Video 100% Complete",
+            "alias": null,
+            "value": null
+        },
+        {
+            "field": "Video Views",
+            "alias": null,
+            "value": null
+        }
+    ],
+    "filters": [
+        {
+            "field": "Advertiser ID",
+            "operator": "=",
+            "value": "1680479"
+        },
+        {
+            "field": "Day",
+            "operator": "Between",
+            "from": "2018-06-10",
+            "to": "2018-06-10"
+        }
+    ],
+    "ordering": [],
+    "si": 0,
+    "mr": -1,
+    "includeRowCount": false
+}"""
+
   def generateHiveQuery(requestJson: String): String = {
     val requestRaw = ReportingRequest.deserializeAsync(requestJson.getBytes(StandardCharsets.UTF_8), AdvertiserSchema)
     val registry = getDefaultRegistry()
