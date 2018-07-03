@@ -10,6 +10,7 @@ import com.ning.http.client.Response
 import com.yahoo.maha.core._
 import com.yahoo.maha.core.query._
 import com.yahoo.maha.core.query.druid.{DruidQuery, GroupByDruidQuery, TimeseriesDruidQuery, TopNDruidQuery}
+
 import grizzled.slf4j.Logging
 import org.joda.time.DateTime
 import org.joda.time.format.DateTimeFormatter
@@ -18,6 +19,7 @@ import org.json4s.JsonAST._
 import org.json4s.jackson.JsonMethods._
 import scala.collection.concurrent.TrieMap
 import scala.util.{Failure, Try}
+
 
 /**
  * Created by hiral on 12/22/15.
@@ -329,7 +331,7 @@ class DruidQueryExecutor(config:DruidQueryExecutorConfig , lifecycleListener: Ex
           val isFactDriven = query.queryContext.requestModel.isFactDriven
           val performJoin = irl.size > 0
           val result = Try {
-            val response : Response= httpUtils.post(url,httpUtils.POST,headersWithAuthHeader,Some(query.asString))
+            val response : Response= httpUtils.post(url,POST,headersWithAuthHeader,Some(query.asString))
 
             val temp = checkUncoveredIntervals(query, response, config)
 
@@ -377,7 +379,7 @@ class DruidQueryExecutor(config:DruidQueryExecutorConfig , lifecycleListener: Ex
         case rl if rl.isInstanceOf[QueryRowList] =>
           val qrl = rl.asInstanceOf[QueryRowList]
           val result = Try {
-            val response = httpUtils.post(url,httpUtils.POST,headersWithAuthHeader,Some(query.asString))
+            val response = httpUtils.post(url,POST,headersWithAuthHeader,Some(query.asString))
 
             val temp = checkUncoveredIntervals(query, response, config)
 

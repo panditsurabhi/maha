@@ -417,22 +417,23 @@ object DynamicMahaServiceConfig {
     mahaServiceConfig
   }
 
-  def createDependencyTree(config: JsonMahaServiceConfig, objectNameMap: Map[String, Object]): Map[String, List[Object]] = {
-    val dependencyTree = new mutable.HashMap[String, List[Object]] ()
+  def createDependencyTree(config: JsonMahaServiceConfig, objectNameMap: Map[String, Object]): Map[String, List[String]] = {
+    println("Object Name Map: " + objectNameMap)
+    val dependencyTree = new mutable.HashMap[String, List[String]] ()
 
     def updateTree(objectName: String, jValue: json4s.JValue) = {
       val leaves = new mutable.ArrayBuffer[JValue]
       findLeafNodes(jValue, leaves)
       val filtered = leaves.filter(l => l.isInstanceOf[JString] && l.asInstanceOf[JString].s.contains("%D%"))
       filtered.foreach(dynamicKeyCol => {
-        println(s"Key: $objectName Col: $dynamicKeyCol")
+        //println(s"Key: $objectName Col: $dynamicKeyCol")
         val configStr = dynamicKeyCol.asInstanceOf[JString].s
         val dynamicConfigKey = configStr
           .replaceAll("\\%D\\%\\(", "")
           .substring(0, configStr.indexOf(",") - 4)
-        println(dynamicConfigKey)
+        //println(dynamicConfigKey)
         require(objectNameMap.contains(objectName), s"No object with name: $objectName present in MahaServiceConfig")
-        dependencyTree.+=((dynamicConfigKey, List(objectNameMap.get(objectName).get)))
+        dependencyTree.+=((dynamicConfigKey, List(objectName)))
       })
     }
     for ((key, jsonBucketingConfig) <- config.bucketingConfigMap) {
@@ -453,16 +454,21 @@ object DynamicMahaServiceConfig {
 }
 
 
-
 trait DynamicMahaServiceConfig {
+
+  /* Get configured object by name */
   def getObjectByName(name: String): Option[Object]
 
-  // keyName can be a property name or the 'name' of the object in the config (eg bean name)
-  def getDependentObjects(keyName: String): List[Object]
+  /* Get all dependent objects for the given key.
+     keyName can be a property name or the 'name' of the object in the config (eg bean name)
+   */
+  def getDependentObjectNames(keyName: String): List[String]
+
+  /* May be useful to get by type, not sure yet */
   def getObjectByType[T](objectType: Class[T]): T
 }
 
-class DynamicMahaServiceConfigImpl(dependencyTree: Map[String, List[Object]],
+class DynamicMahaServiceConfigImpl(dependencyTree: Map[String, List[String]],
                                    objectNameMap: Map[String, Object],
                                    registry: Map[String, RegistryConfig],
                                    mahaRequestLogWriter: MahaRequestLogWriter,
@@ -472,7 +478,7 @@ class DynamicMahaServiceConfigImpl(dependencyTree: Map[String, List[Object]],
     objectNameMap.get(name)
   }
 
-  override def getDependentObjects(keyName: String): List[Object] = {
+  override def getDependentObjectNames(keyName: String): List[String] = {
     dependencyTree.get(keyName).getOrElse(List.empty)
   }
 
