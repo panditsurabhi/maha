@@ -412,7 +412,7 @@ object DynamicMahaServiceConfig {
             parallelServiceExecutorConfigMap.get(registryConfig.parallelServiceExecutorName).get))
         }
       }
-      new DynamicMahaServiceConfigImpl(dependencyTree, resultMap, mahaRequestLogWriter, curatorMap)
+      new DynamicMahaServiceConfigImpl(dependencyTree, objectNameMap.toMap, resultMap, mahaRequestLogWriter, curatorMap)
     }
     mahaServiceConfig
   }
@@ -455,20 +455,25 @@ object DynamicMahaServiceConfig {
 
 
 trait DynamicMahaServiceConfig {
-  def getObjectByName(name: String): Object
+  def getObjectByName(name: String): Option[Object]
+
+  // keyName can be a property name or the 'name' of the object in the config (eg bean name)
+  def getDependentObjects(keyName: String): List[Object]
   def getObjectByType[T](objectType: Class[T]): T
-
-
 }
 
-class DynamicMahaServiceConfigImpl(objectTree: Map[String, List[Object]],
-                               registry: Map[String, RegistryConfig],
-                               mahaRequestLogWriter: MahaRequestLogWriter,
-                               curatorMap: Map[String, Curator]) extends MahaServiceConfig(registry, mahaRequestLogWriter, curatorMap) with DynamicMahaServiceConfig {
+class DynamicMahaServiceConfigImpl(dependencyTree: Map[String, List[Object]],
+                                   objectNameMap: Map[String, Object],
+                                   registry: Map[String, RegistryConfig],
+                                   mahaRequestLogWriter: MahaRequestLogWriter,
+                                   curatorMap: Map[String, Curator]) extends MahaServiceConfig(registry, mahaRequestLogWriter, curatorMap) with DynamicMahaServiceConfig {
 
+  override def getObjectByName(name: String): Option[Object] = {
+    objectNameMap.get(name)
+  }
 
-  override def getObjectByName(name: String): Object = {
-    null
+  override def getDependentObjects(keyName: String): List[Object] = {
+    dependencyTree.get(keyName).getOrElse(List.empty)
   }
 
   override def getObjectByType[T](objectType: Class[T]): T = throw new UnsupportedOperationException
