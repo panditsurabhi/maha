@@ -256,30 +256,44 @@ object DruidQueryExecutor extends Logging {
 
 class DruidQueryExecutor(config:DruidQueryExecutorConfig , lifecycleListener: ExecutionLifecycleListener,
                          transformers: List[ResultSetTransformer] = ResultSetTransformer.DEFAULT_TRANSFORMS,
-                         authHeaderProvider: AuthHeaderProvider = new NoopAuthHeaderProvider) extends QueryExecutor with Logging with Closeable {
+                         authHeaderProvider: AuthHeaderProvider = new NoopAuthHeaderProvider) extends QueryExecutor with Logging with Closeable with Reconfigurable {
   val engine: Engine = DruidEngine
-  val httpUtils = new HttpUtils(ClientConfig
-    .getConfig(
-      config.maxConnectionsPerHost
-      ,config.maxConnections
-      ,config.connectionTimeout
-      ,config.timeoutRetryInterval
-      ,config.timeoutThreshold
-      ,config.degradationConfigName
-      ,config.readTimeout
-      ,config.requestTimeout
-      ,config.pooledConnectionIdleTimeout
-      ,config.timeoutMaxResponseTimeInMs
-      ,config.sslContextVersion
-      ,config.commaSeparatedCipherSuitesList
-    )
-    , config.enableRetryOn500
-    , config.retryDelayMillis
-    , config.maxRetry
-  )
+  var httpUtils = getHttpUtils(config)
+
   val url = config.url
 
   override def close(): Unit = httpUtils.close()
+
+  override def reconfigure(updatedConfigs: Map[String, Object]): Unit = {
+    updatedConfigs.keys.foreach(key => {
+      key match {
+        case "druid.read.timeout" =>
+          httpUtils = getHttpUtils(config.copy(readTimeout = updatedConfigs.get("druid.read.timeout").get.toString.toInt))
+      }
+    })
+  }
+
+  def getHttpUtils(config: DruidQueryExecutorConfig): HttpUtils = {
+    new HttpUtils(ClientConfig
+      .getConfig(
+        config.maxConnectionsPerHost
+        ,config.maxConnections
+        ,config.connectionTimeout
+        ,config.timeoutRetryInterval
+        ,config.timeoutThreshold
+        ,config.degradationConfigName
+        ,config.readTimeout
+        ,config.requestTimeout
+        ,config.pooledConnectionIdleTimeout
+        ,config.timeoutMaxResponseTimeInMs
+        ,config.sslContextVersion
+        ,config.commaSeparatedCipherSuitesList
+      )
+      , config.enableRetryOn500
+      , config.retryDelayMillis
+      , config.maxRetry
+    )
+  }
 
   def checkUncoveredIntervals(query : Query, response : Response, config: DruidQueryExecutorConfig) : Unit = {
     val requestModel = query.queryContext.requestModel

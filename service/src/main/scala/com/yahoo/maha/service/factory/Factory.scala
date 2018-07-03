@@ -197,8 +197,8 @@ object DefaultBucketingConfigFactory {
     }
   }
 
-  implicit def rpcJSON: JSONR[RevisionPercentConfig] = RevisionPercentConfig.applyJSON(fieldExtended[Int]("revision")
-    , fieldExtended[Int]("percent"))
+  implicit def rpcJSON: JSONR[RevisionPercentConfig] = RevisionPercentConfig.applyJSON(dynamicFieldExtended[Int]("revision")
+    , dynamicFieldExtended[Int]("percent"))
   implicit def rpecJSON: JSONR[RevisionPercentEngineConfig] = RevisionPercentEngineConfig.applyJSON(fieldExtended[Int]("revision")
     , fieldExtended[Int]("percent")
     , fieldExtended[Option[Engine]]("engine"))

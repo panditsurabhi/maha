@@ -47,7 +47,7 @@ class DefaultDruidQueryExecutorConfigFactory extends DruidQueryExecutorConfigFac
     val degradationConfigNameResult: MahaServiceConfig.MahaConfigResult[String] = fieldExtended[String]("degradationConfigName")(configJson)
     val urlResult: MahaServiceConfig.MahaConfigResult[String] = fieldExtended[String]("url")(configJson)
     val headersOptionResult: MahaServiceConfig.MahaConfigResult[Option[Map[String, String]]] = fieldExtended[Option[Map[String, String]]]("headers")(configJson)
-    val readTimeoutResult: MahaServiceConfig.MahaConfigResult[Int] = fieldExtended[Int]("readTimeout")(configJson)
+    val readTimeoutResult: MahaServiceConfig.MahaConfigResult[Int] = dynamicFieldExtended[Int]("readTimeout")(configJson)
     val requestTimeoutResult: MahaServiceConfig.MahaConfigResult[Int] = fieldExtended[Int]("requestTimeout")(configJson)
     val pooledConnectionIdleTimeoutResult: MahaServiceConfig.MahaConfigResult[Int] = fieldExtended[Int]("pooledConnectionIdleTimeout")(configJson)
     val timeoutMaxResponseTimeInMsResult: MahaServiceConfig.MahaConfigResult[Int] = fieldExtended[Int]("timeoutMaxResponseTimeInMs")(configJson)

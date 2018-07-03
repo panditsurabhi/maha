@@ -15,12 +15,15 @@ import com.yahoo.maha.core.request.ReportingRequest
 import com.yahoo.maha.log.MahaRequestLogWriter
 import com.yahoo.maha.parrequest2.future.{ParRequest, ParallelServiceExecutor}
 import com.yahoo.maha.parrequest2.{GeneralError, ParCallable}
+import com.yahoo.maha.service.MahaServiceConfig._
 import com.yahoo.maha.service.config._
 import com.yahoo.maha.service.curators.Curator
 import com.yahoo.maha.service.error._
 import com.yahoo.maha.service.factory._
 import com.yahoo.maha.service.utils.BaseMahaRequestLogBuilder
 import grizzled.slf4j.Logging
+import org.json4s
+import org.json4s.{JString, JValue}
 import org.json4s.jackson.JsonMethods.parse
 import org.json4s.scalaz.JsonScalaz._
 
@@ -347,6 +350,130 @@ case class DefaultMahaService(config: MahaServiceConfig) extends MahaService wit
   }
 
 }
+
+object DynamicMahaServiceConfig {
+  def fromJson(ba: Array[Byte]): MahaServiceConfig.MahaConfigResult[DynamicMahaServiceConfig] = {
+    val json = {
+      Try(parse(new String(ba, StandardCharsets.UTF_8))) match {
+        case t if t.isSuccess => t.get
+        case t if t.isFailure => {
+          return Failure(JsonParseError(s"invalidInputJson : ${t.failed.get.getMessage}", Option(t.failed.toOption.get))).toValidationNel
+        }
+      }
+    }
+
+    val jsonMahaServiceConfigResult: ValidationNel[MahaServiceError, JsonMahaServiceConfig] = fromJSON[JsonMahaServiceConfig](json).leftMap {
+      nel => nel.map(err => JsonParseError(err.toString))
+    }
+
+    val mahaServiceConfig = for {
+      jsonMahaServiceConfig <- jsonMahaServiceConfigResult
+      validationResult <- validateReferenceByName(jsonMahaServiceConfig)
+      bucketConfigMap <- initBucketingConfig(jsonMahaServiceConfig.bucketingConfigMap)
+      utcTimeProviderMap <- initUTCTimeProvider(jsonMahaServiceConfig.utcTimeProviderMap)
+      generatorMap <- initGenerators(jsonMahaServiceConfig.generatorMap)
+      executorMap <- initExecutors(jsonMahaServiceConfig.executorMap)
+      registryMap <- initRegistry(jsonMahaServiceConfig.registryMap)
+      parallelServiceExecutorConfigMap <- initParallelServiceExecutors(jsonMahaServiceConfig.parallelServiceExecutorConfigMap)
+      mahaRequestLogWriter <- initKafkaLogWriter(jsonMahaServiceConfig.jsonMahaRequestLogConfig)
+      curatorMap <- initCurators(jsonMahaServiceConfig.curatorMap)
+    } yield {
+      // TODO: Find a better way to merge maps
+      val objectNameMap = new scala.collection.mutable.HashMap[String, Object]()
+      bucketConfigMap.foreach(f => objectNameMap.put(f._1, f._2))
+      utcTimeProviderMap.foreach(f => objectNameMap.put(f._1, f._2))
+      generatorMap.foreach(f => objectNameMap.put(f._1, f._2))
+      executorMap.foreach(f => objectNameMap.put(f._1, f._2))
+      registryMap.foreach(f => objectNameMap.put(f._1, f._2))
+      parallelServiceExecutorConfigMap.foreach(f => objectNameMap.put(f._1, f._2))
+      curatorMap.foreach(f => objectNameMap.put(f._1, f._2))
+
+      val dependencyTree = createDependencyTree(jsonMahaServiceConfig, objectNameMap.toMap)
+      val resultMap: Map[String, RegistryConfig] = registryMap.map {
+        case (regName, registry) => {
+          val registryConfig = jsonMahaServiceConfig.registryMap.get(regName.toLowerCase).get
+
+          implicit val queryGeneratorRegistry = new QueryGeneratorRegistry
+          generatorMap.filter(g => registryConfig.generators.contains(g._1)).foreach {
+            case (name, generator) =>
+              queryGeneratorRegistry.register(generator.engine, generator)
+          }
+          val queryExecutorContext = new QueryExecutorContext
+          executorMap.filter(e => registryConfig.executors.contains(e._1)).foreach {
+            case (_, executor) =>
+              queryExecutorContext.register(executor)
+          }
+          (regName -> RegistryConfig(regName,
+            registry,
+            new DefaultQueryPipelineFactory(),
+            queryExecutorContext,
+            new BucketSelector(registry, bucketConfigMap.get(registryConfig.bucketConfigName).get),
+            utcTimeProviderMap.get(registryConfig.utcTimeProviderName).get,
+            parallelServiceExecutorConfigMap.get(registryConfig.parallelServiceExecutorName).get))
+        }
+      }
+      new DynamicMahaServiceConfigImpl(dependencyTree, resultMap, mahaRequestLogWriter, curatorMap)
+    }
+    mahaServiceConfig
+  }
+
+  def createDependencyTree(config: JsonMahaServiceConfig, objectNameMap: Map[String, Object]): Map[String, List[Object]] = {
+    val dependencyTree = new mutable.HashMap[String, List[Object]] ()
+
+    def updateTree(objectName: String, jValue: json4s.JValue) = {
+      val leaves = new mutable.ArrayBuffer[JValue]
+      findLeafNodes(jValue, leaves)
+      val filtered = leaves.filter(l => l.isInstanceOf[JString] && l.asInstanceOf[JString].s.contains("%D%"))
+      filtered.foreach(dynamicKeyCol => {
+        println(s"Key: $objectName Col: $dynamicKeyCol")
+        val configStr = dynamicKeyCol.asInstanceOf[JString].s
+        val dynamicConfigKey = configStr
+          .replaceAll("\\%D\\%\\(", "")
+          .substring(0, configStr.indexOf(",") - 4)
+        println(dynamicConfigKey)
+        require(objectNameMap.contains(objectName), s"No object with name: $objectName present in MahaServiceConfig")
+        dependencyTree.+=((dynamicConfigKey, List(objectNameMap.get(objectName).get)))
+      })
+    }
+    for ((key, jsonBucketingConfig) <- config.bucketingConfigMap) {
+      updateTree(key, jsonBucketingConfig.json)
+    }
+
+    for ((key, executorConfig) <- config.executorMap) {
+      updateTree(key, executorConfig.json)
+    }
+
+    dependencyTree.toMap
+  }
+
+  def findLeafNodes(node: JValue, leaves: mutable.ArrayBuffer[JValue]): Unit = {
+    if (node.children.isEmpty) leaves.+=(node)
+    node.children.foreach(child => findLeafNodes(child, leaves))
+  }
+}
+
+
+
+trait DynamicMahaServiceConfig {
+  def getObjectByName(name: String): Object
+  def getObjectByType[T](objectType: Class[T]): T
+
+
+}
+
+class DynamicMahaServiceConfigImpl(objectTree: Map[String, List[Object]],
+                               registry: Map[String, RegistryConfig],
+                               mahaRequestLogWriter: MahaRequestLogWriter,
+                               curatorMap: Map[String, Curator]) extends MahaServiceConfig(registry, mahaRequestLogWriter, curatorMap) with DynamicMahaServiceConfig {
+
+
+  override def getObjectByName(name: String): Object = {
+    null
+  }
+
+  override def getObjectByType[T](objectType: Class[T]): T = throw new UnsupportedOperationException
+}
+
 
 object MahaServiceConfig {
   type MahaConfigResult[+A] = scalaz.ValidationNel[MahaServiceError, A]
