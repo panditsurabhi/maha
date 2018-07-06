@@ -6,6 +6,8 @@ import java.nio.charset.StandardCharsets
 import java.util
 import java.util.UUID
 
+import com.netflix.config.{DynamicIntProperty, DynamicPropertyFactory, DynamicStringProperty}
+import com.yahoo.maha.core.bucketing.BucketSelector
 import com.yahoo.maha.service.{DynamicMahaServiceConfig, DynamicWrapper, MahaServiceConfig}
 import com.yahoo.maha.service.config.JsonMahaServiceConfig
 import com.yahoo.maha.service.error.{JsonParseError, MahaServiceError}
@@ -1042,9 +1044,36 @@ class MahaServiceTest extends BaseFactoryTest {
 
     //println(jsonString)
 
+    System.setProperty("archaius.configurationSource.additionalUrls", "file:///Users/surabhip/git/maha/core/src/main/resources/override.properties")
+    System.setProperty("archaius.configurationSource.defaultFileName", "config.properties")
+    System.setProperty("archaius.fixedDelayPollingScheduler.initialDelayMills", "1000")
+    System.setProperty("archaius.fixedDelayPollingScheduler.delayMills", "1000")
     val dynamicMahaServiceConfig = DynamicMahaServiceConfig.fromJson(jsonString.getBytes(StandardCharsets.UTF_8))
     println(dynamicMahaServiceConfig)
     println(dynamicMahaServiceConfig.toOption.get.registry.get("er").get.bucketSelector.getBucketingConfig.getConfig("student_performance").get.externalBucketPercentage)
+
+
+    val s: DynamicIntProperty = DynamicPropertyFactory.getInstance()
+      .getIntProperty("student_performance.external.rev0.percent", 0)
+    s.addCallback(new Runnable {
+        override def run(): Unit = {
+          println("Bucket percent changed: " + s)
+          val jsonMahaServiceConfigResult: ValidationNel[MahaServiceError, JsonMahaServiceConfig] =
+            fromJSON[JsonMahaServiceConfig](parse(new String(jsonString.getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8))).leftMap {
+              nel => nel.map(err => JsonParseError(err.toString))
+            }
+
+          val jsonMahaConfig = jsonMahaServiceConfigResult.toOption.get
+          val bucketConfigMapResult = MahaServiceConfig.initBucketingConfig(jsonMahaConfig.bucketingConfigMap)
+          println(bucketConfigMapResult.toOption.get.get("er").get.getConfig("student_performance").get.externalBucketPercentage)
+          val newBucketSelector = new BucketSelector(dynamicMahaServiceConfig.toOption.get.registry.get("er").get.registry, bucketConfigMapResult.toOption.get.get("er").get)
+          val currentValue = dynamicMahaServiceConfig.toOption.get.registry.get("er").get.bucketSelector
+          currentValue.getClass.getField(DynamicWrapper.CURRENT_OBJECT).set(currentValue, newBucketSelector)
+          
+        }
+      })
+    println(s.get())
+    Thread.sleep(3000)
 
   }
 
@@ -1056,6 +1085,7 @@ class MahaServiceTest extends BaseFactoryTest {
     instance.someMethod()
     dynamicClass.getField("currentObject").set(instance, new ByteBuddyTest("new-value"))
     instance.someMethod()
+
   }
 
 }
