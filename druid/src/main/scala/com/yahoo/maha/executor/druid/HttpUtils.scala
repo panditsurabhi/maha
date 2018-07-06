@@ -15,11 +15,12 @@ import grizzled.slf4j.Logging
 import org.apache.http.HttpHeaders
 import org.apache.http.entity.ContentType;
 
-sealed trait RequestMethod
-case object GET extends RequestMethod
-case object POST extends RequestMethod
 
 class HttpUtils(config:AsyncHttpClientConfig, enableRetryOn500: Boolean, retryDelayMillis: Int, maxRetry: Int) extends Logging with Closeable {
+
+  sealed trait RequestMethod
+  case object GET extends RequestMethod
+  case object POST extends RequestMethod
 
 
   private[this] val client = new AsyncHttpClient(config)

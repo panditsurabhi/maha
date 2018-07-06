@@ -10,7 +10,6 @@ import com.ning.http.client.Response
 import com.yahoo.maha.core._
 import com.yahoo.maha.core.query._
 import com.yahoo.maha.core.query.druid.{DruidQuery, GroupByDruidQuery, TimeseriesDruidQuery, TopNDruidQuery}
-
 import grizzled.slf4j.Logging
 import org.joda.time.DateTime
 import org.joda.time.format.DateTimeFormatter
@@ -20,10 +19,9 @@ import org.json4s.jackson.JsonMethods._
 import scala.collection.concurrent.TrieMap
 import scala.util.{Failure, Try}
 
-
 /**
- * Created by hiral on 12/22/15.
- */
+  * Created by hiral on 12/22/15.
+  */
 
 trait AuthHeaderProvider {
   def getAuthHeaders : Map[String, String]
@@ -50,7 +48,7 @@ case class DruidQueryExecutorConfig(maxConnectionsPerHost:Int
                                     , enableFallbackOnUncoveredIntervals: Boolean = false
                                     , sslContextVersion: String = "TLSv1.2"
                                     , commaSeparatedCipherSuitesList: String = "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384,TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,TLS_RSA_WITH_AES_128_GCM_SHA256,TLS_RSA_WITH_AES_256_GCM_SHA384,TLS_RSA_WITH_AES_128_CBC_SHA256,TLS_RSA_WITH_AES_256_CBC_SHA256,TLS_RSA_WITH_AES_128_CBC_SHA,TLS_RSA_WITH_AES_256_CBC_SHA"
-                                     )
+                                   )
 
 object DruidQueryExecutor extends Logging {
 
@@ -88,12 +86,12 @@ object DruidQueryExecutor extends Logging {
   }
 
   def processResult[T <: QueryRowList](query:Query
-                                  , transformers: List[ResultSetTransformer]
-                                  , getRow: List[JField] => Row
-                                  , getEphemeralRow: List[JField] => Row
-                                  , rowList: T
-                                  , jsonString: String
-                                  , eventObject: List[JField]): Unit = {
+                                       , transformers: List[ResultSetTransformer]
+                                       , getRow: List[JField] => Row
+                                       , getEphemeralRow: List[JField] => Row
+                                       , rowList: T
+                                       , jsonString: String
+                                       , eventObject: List[JField]): Unit = {
     val aliasColumnMap = query.aliasColumnMap
     val ephemeralAliasColumnMap = query.ephemeralAliasColumnMap
     val row =getRow(eventObject)
@@ -127,7 +125,7 @@ object DruidQueryExecutor extends Logging {
   }
 
   def parseJsonAndPopulateResultSet[T <: QueryRowList](query:Query,response:Response,rowList: T, getRow: List[JField] => Row, getEphemeralRow: List[JField] => Row,
-                                                  transformers: List[ResultSetTransformer]  ) : Unit ={
+                                                       transformers: List[ResultSetTransformer]  ) : Unit ={
     val jsonString : String = response.getResponseBody(StandardCharsets.UTF_8.displayName())
 
     if(query.queryContext.requestModel.isDebugEnabled) {
@@ -256,46 +254,51 @@ object DruidQueryExecutor extends Logging {
   }
 }
 
+
+class DynamicDruidQueryExecutor(config:DruidQueryExecutorConfig , lifecycleListener: ExecutionLifecycleListener,
+                                transformers: List[ResultSetTransformer] = ResultSetTransformer.DEFAULT_TRANSFORMS,
+                                authHeaderProvider: AuthHeaderProvider = new NoopAuthHeaderProvider) extends QueryExecutor {
+
+  override def engine: Engine = DruidEngine
+
+  var currentObject = new DruidQueryExecutor(config, lifecycleListener, transformers, authHeaderProvider)
+
+  def updateObject(updatedObject: DruidQueryExecutor) = {
+    currentObject = updatedObject
+  }
+
+  override def execute[T <: RowList](query: Query, rowList: T, queryAttributes: QueryAttributes): QueryResult[T] = {
+    currentObject.execute(query, rowList, queryAttributes)
+  }
+}
+
+
 class DruidQueryExecutor(config:DruidQueryExecutorConfig , lifecycleListener: ExecutionLifecycleListener,
                          transformers: List[ResultSetTransformer] = ResultSetTransformer.DEFAULT_TRANSFORMS,
-                         authHeaderProvider: AuthHeaderProvider = new NoopAuthHeaderProvider) extends QueryExecutor with Logging with Closeable with Reconfigurable {
+                         authHeaderProvider: AuthHeaderProvider = new NoopAuthHeaderProvider) extends QueryExecutor with Logging with Closeable {
   val engine: Engine = DruidEngine
-  var httpUtils = getHttpUtils(config)
-
+  val httpUtils = new HttpUtils(ClientConfig
+    .getConfig(
+      config.maxConnectionsPerHost
+      ,config.maxConnections
+      ,config.connectionTimeout
+      ,config.timeoutRetryInterval
+      ,config.timeoutThreshold
+      ,config.degradationConfigName
+      ,config.readTimeout
+      ,config.requestTimeout
+      ,config.pooledConnectionIdleTimeout
+      ,config.timeoutMaxResponseTimeInMs
+      ,config.sslContextVersion
+      ,config.commaSeparatedCipherSuitesList
+    )
+    , config.enableRetryOn500
+    , config.retryDelayMillis
+    , config.maxRetry
+  )
   val url = config.url
 
   override def close(): Unit = httpUtils.close()
-
-  override def reconfigure(updatedConfigs: Map[String, Object]): Unit = {
-    updatedConfigs.keys.foreach(key => {
-      key match {
-        case "druid.read.timeout" =>
-          httpUtils = getHttpUtils(config.copy(readTimeout = updatedConfigs.get("druid.read.timeout").get.toString.toInt))
-      }
-    })
-  }
-
-  def getHttpUtils(config: DruidQueryExecutorConfig): HttpUtils = {
-    new HttpUtils(ClientConfig
-      .getConfig(
-        config.maxConnectionsPerHost
-        ,config.maxConnections
-        ,config.connectionTimeout
-        ,config.timeoutRetryInterval
-        ,config.timeoutThreshold
-        ,config.degradationConfigName
-        ,config.readTimeout
-        ,config.requestTimeout
-        ,config.pooledConnectionIdleTimeout
-        ,config.timeoutMaxResponseTimeInMs
-        ,config.sslContextVersion
-        ,config.commaSeparatedCipherSuitesList
-      )
-      , config.enableRetryOn500
-      , config.retryDelayMillis
-      , config.maxRetry
-    )
-  }
 
   def checkUncoveredIntervals(query : Query, response : Response, config: DruidQueryExecutorConfig) : Unit = {
     val requestModel = query.queryContext.requestModel
@@ -331,7 +334,7 @@ class DruidQueryExecutor(config:DruidQueryExecutorConfig , lifecycleListener: Ex
           val isFactDriven = query.queryContext.requestModel.isFactDriven
           val performJoin = irl.size > 0
           val result = Try {
-            val response : Response= httpUtils.post(url,POST,headersWithAuthHeader,Some(query.asString))
+            val response : Response= httpUtils.post(url,httpUtils.POST,headersWithAuthHeader,Some(query.asString))
 
             val temp = checkUncoveredIntervals(query, response, config)
 
@@ -379,7 +382,7 @@ class DruidQueryExecutor(config:DruidQueryExecutorConfig , lifecycleListener: Ex
         case rl if rl.isInstanceOf[QueryRowList] =>
           val qrl = rl.asInstanceOf[QueryRowList]
           val result = Try {
-            val response = httpUtils.post(url,POST,headersWithAuthHeader,Some(query.asString))
+            val response = httpUtils.post(url,httpUtils.POST,headersWithAuthHeader,Some(query.asString))
 
             val temp = checkUncoveredIntervals(query, response, config)
 
@@ -405,6 +408,3 @@ class DruidQueryExecutor(config:DruidQueryExecutorConfig , lifecycleListener: Ex
     }
   }
 }
-
-
-

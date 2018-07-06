@@ -89,6 +89,8 @@ trait BucketingConfig {
 class DefaultBucketingConfig(bucketingConfigMap:scala.collection.immutable.Map[String,CubeBucketingConfig]) extends BucketingConfig {
   validate()
 
+  def this() {this(scala.collection.immutable.Map.empty)}
+
   private[this] def validate(): Unit = {
     for((cubeName,bucketingConfig)<-bucketingConfigMap) {
       bucketingConfig.validate(cubeName)

@@ -63,7 +63,7 @@ class HttpUtilsTest extends FunSuite with Matchers with BeforeAndAfterAll with L
       )
     assert(config.isFollowRedirect === true)
     val httpUtils = new HttpUtils(config, true, 500, 3)
-    val response  = httpUtils.post("http://localhost:5544/mock/groupby",POST)
+    val response  = httpUtils.post("http://localhost:5544/mock/groupby",httpUtils.POST)
     
     assert(response.getStatusCode==200)
   }
@@ -82,7 +82,7 @@ class HttpUtilsTest extends FunSuite with Matchers with BeforeAndAfterAll with L
                  |	}]
                  |}]""".stripMargin
     val httpUtils = new HttpUtils(ClientConfig.getConfig(maxConnectionsPerHost,maxConnections,connectionTimeout,timeoutRetryInterval,timeoutThreshold, degradationConfig,readTimeout,requestTimeout,pooledConnectionIdleTimeout,timeoutMaxResponseTimeInMs,sslContextVersion,commaSeparatedCipherSuitesList), true, 500, 3)
-    val response  = httpUtils.post("http://localhost:5544/mock/groupby",POST,None,Some(topN))
+    val response  = httpUtils.post("http://localhost:5544/mock/groupby",httpUtils.POST,None,Some(topN))
     
     assert(response.getStatusCode==200)
   }
@@ -91,7 +91,7 @@ class HttpUtilsTest extends FunSuite with Matchers with BeforeAndAfterAll with L
   test("successful GET call test") {
     
     val httpUtils = new HttpUtils(ClientConfig.getConfig(maxConnectionsPerHost,maxConnections,connectionTimeout,timeoutRetryInterval,timeoutThreshold, degradationConfig,readTimeout,requestTimeout,pooledConnectionIdleTimeout,timeoutMaxResponseTimeInMs,sslContextVersion,commaSeparatedCipherSuitesList), true, 500, 3)
-    val response  = httpUtils.post("http://localhost:5544/mock/topn",GET)
+    val response  = httpUtils.post("http://localhost:5544/mock/topn",httpUtils.GET)
     
     assert(response.getStatusCode==200)
   }
@@ -99,7 +99,7 @@ class HttpUtilsTest extends FunSuite with Matchers with BeforeAndAfterAll with L
   test("Invalid url call test"){
     
     val httpUtils = new HttpUtils(ClientConfig.getConfig(maxConnectionsPerHost,maxConnections,connectionTimeout,timeoutRetryInterval,timeoutThreshold, degradationConfig,readTimeout,requestTimeout,pooledConnectionIdleTimeout,timeoutMaxResponseTimeInMs,sslContextVersion,commaSeparatedCipherSuitesList), true, 500, 3)
-    val response  = httpUtils.get("http://localhost:5544/mock/invalid",GET)
+    val response  = httpUtils.get("http://localhost:5544/mock/invalid",httpUtils.GET)
     
     assert(response.getStatusCode==404)
   }
@@ -108,7 +108,7 @@ class HttpUtilsTest extends FunSuite with Matchers with BeforeAndAfterAll with L
     
     val httpUtils = new HttpUtils(ClientConfig.getConfig(maxConnectionsPerHost,maxConnections,connectionTimeout,timeoutRetryInterval,timeoutThreshold, degradationConfig,readTimeout,requestTimeout,pooledConnectionIdleTimeout,timeoutMaxResponseTimeInMs,sslContextVersion,commaSeparatedCipherSuitesList), true, 500, 3)
     var headers = Map("Content-Type"->"Application/Json")
-    val response  = httpUtils.get("http://localhost:5544/mock/topn",GET,Some(headers))
+    val response  = httpUtils.get("http://localhost:5544/mock/topn",httpUtils.GET,Some(headers))
     
     assert(response.getStatusCode==200)
   }
@@ -127,7 +127,7 @@ class HttpUtilsTest extends FunSuite with Matchers with BeforeAndAfterAll with L
     
     assert(failFirstBoolean.get() === false)
     val httpUtils = new HttpUtils(ClientConfig.getConfig(maxConnectionsPerHost,maxConnections,connectionTimeout,timeoutRetryInterval,timeoutThreshold, degradationConfig,readTimeout,requestTimeout,pooledConnectionIdleTimeout,timeoutMaxResponseTimeInMs,sslContextVersion,commaSeparatedCipherSuitesList), true, 500, 3)
-    val response  = httpUtils.post("http://localhost:5544/mock/failFirst",POST)
+    val response  = httpUtils.post("http://localhost:5544/mock/failFirst",httpUtils.POST)
     
     assert(response.getStatusCode==200)
     assert(failFirstBoolean.get() === true)
@@ -136,7 +136,7 @@ class HttpUtilsTest extends FunSuite with Matchers with BeforeAndAfterAll with L
   test("exhaust max retry on 500"){
     
     val httpUtils = new HttpUtils(ClientConfig.getConfig(maxConnectionsPerHost,maxConnections,connectionTimeout,timeoutRetryInterval,timeoutThreshold, degradationConfig,readTimeout,requestTimeout,pooledConnectionIdleTimeout,timeoutMaxResponseTimeInMs,sslContextVersion,commaSeparatedCipherSuitesList), true, 500, 3)
-    val response  = httpUtils.post("http://localhost:5544/mock/fail",POST)
+    val response  = httpUtils.post("http://localhost:5544/mock/fail",httpUtils.POST)
     
     assert(response.getStatusCode==500)
     httpUtils.close()

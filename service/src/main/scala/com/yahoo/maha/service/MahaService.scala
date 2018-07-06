@@ -3,9 +3,11 @@
 package com.yahoo.maha.service
 
 
+import java.lang.reflect.Modifier
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.Callable
 
+import net.bytebuddy.implementation.bind.annotation.FieldProxy
 import com.google.common.io.Closer
 import com.yahoo.maha.core._
 import com.yahoo.maha.core.bucketing.{BucketParams, BucketSelector, BucketingConfig}
@@ -22,6 +24,19 @@ import com.yahoo.maha.service.error._
 import com.yahoo.maha.service.factory._
 import com.yahoo.maha.service.utils.BaseMahaRequestLogBuilder
 import grizzled.slf4j.Logging
+import net.bytebuddy.ByteBuddy
+import net.bytebuddy.agent.builder.AgentBuilder
+import net.bytebuddy.asm.Advice
+import net.bytebuddy.asm.Advice.This
+import net.bytebuddy.description.`type`.TypeDefinition
+import net.bytebuddy.description.modifier.Visibility
+import net.bytebuddy.dynamic.loading.ClassLoadingStrategy
+import net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy
+import net.bytebuddy.implementation.{FieldAccessor, MethodDelegation, SuperMethodCall}
+import net.bytebuddy.implementation.bind.annotation.{FieldProxy, RuntimeType}
+import net.bytebuddy.implementation.bytecode.assign.Assigner
+import net.bytebuddy.matcher.ElementMatchers
+import net.bytebuddy.matcher.ElementMatchers._
 import org.json4s
 import org.json4s.{JString, JValue}
 import org.json4s.jackson.JsonMethods.parse
@@ -32,6 +47,10 @@ import scala.util.Try
 import scalaz.Validation.FlatMap._
 import scalaz.syntax.validation._
 import scalaz.{Failure, ValidationNel, _}
+import net.bytebuddy.matcher.ElementMatchers._
+import net.bytebuddy.matcher.ElementMatchers.not
+import collection.JavaConverters._
+
 
 
 /**
@@ -351,8 +370,40 @@ case class DefaultMahaService(config: MahaServiceConfig) extends MahaService wit
 
 }
 
+
+object DynamicWrapper {
+
+  val CURRENT_OBJECT = "currentObject"
+
+  def getDynamicClass(obj: Object) = {
+    println("Class: " + obj.getClass)
+    new ByteBuddy()
+      .subclass(obj.getClass, ConstructorStrategy.Default.DEFAULT_CONSTRUCTOR)
+      .defineField(CURRENT_OBJECT, obj.getClass, Modifier.PUBLIC)
+      .method(ElementMatchers.not(ElementMatchers.isDeclaredBy(classOf[Object])))
+      .intercept(MethodDelegation.toField(CURRENT_OBJECT))
+      .make()
+      .load(getClass().getClassLoader(), ClassLoadingStrategy.Default.WRAPPER)
+      .getLoaded
+  }
+}
+
 object DynamicMahaServiceConfig {
-  def fromJson(ba: Array[Byte]): MahaServiceConfig.MahaConfigResult[DynamicMahaServiceConfig] = {
+
+  def getDynamicObjects(namedObjectMap: MahaServiceConfig.MahaConfigResult[Map[String, Object]]): MahaServiceConfig.MahaConfigResult[Map[String, Object]] = {
+    val dynamicObjectMap = new mutable.HashMap[String, Object]()
+    namedObjectMap.foreach(map => {
+      for ((name, obj) <- map) {
+        val dynamicClass = DynamicWrapper.getDynamicClass(obj)
+        val dynamicInstance = dynamicClass.newInstance()
+        dynamicClass.getField(DynamicWrapper.CURRENT_OBJECT).set(dynamicInstance, obj)
+        dynamicObjectMap.+=((name, dynamicInstance))
+      }
+    })
+    dynamicObjectMap.toMap.successNel[MahaServiceError]
+  }
+
+  def fromJson(ba: Array[Byte]): MahaServiceConfig.MahaConfigResult[DynamicMahaServiceConfigImpl] = {
     val json = {
       Try(parse(new String(ba, StandardCharsets.UTF_8))) match {
         case t if t.isSuccess => t.get
@@ -366,10 +417,11 @@ object DynamicMahaServiceConfig {
       nel => nel.map(err => JsonParseError(err.toString))
     }
 
+    println("jsonMahaServiceConfigResult: "  + jsonMahaServiceConfigResult)
     val mahaServiceConfig = for {
       jsonMahaServiceConfig <- jsonMahaServiceConfigResult
       validationResult <- validateReferenceByName(jsonMahaServiceConfig)
-      bucketConfigMap <- initBucketingConfig(jsonMahaServiceConfig.bucketingConfigMap)
+      bucketConfigMap <- getDynamicObjects(initBucketingConfig(jsonMahaServiceConfig.bucketingConfigMap))
       utcTimeProviderMap <- initUTCTimeProvider(jsonMahaServiceConfig.utcTimeProviderMap)
       generatorMap <- initGenerators(jsonMahaServiceConfig.generatorMap)
       executorMap <- initExecutors(jsonMahaServiceConfig.executorMap)
@@ -388,7 +440,9 @@ object DynamicMahaServiceConfig {
       parallelServiceExecutorConfigMap.foreach(f => objectNameMap.put(f._1, f._2))
       curatorMap.foreach(f => objectNameMap.put(f._1, f._2))
 
+      println("Crated named map")
       val dependencyTree = createDependencyTree(jsonMahaServiceConfig, objectNameMap.toMap)
+      println("Crated dependencyTree")
       val resultMap: Map[String, RegistryConfig] = registryMap.map {
         case (regName, registry) => {
           val registryConfig = jsonMahaServiceConfig.registryMap.get(regName.toLowerCase).get
@@ -407,11 +461,12 @@ object DynamicMahaServiceConfig {
             registry,
             new DefaultQueryPipelineFactory(),
             queryExecutorContext,
-            new BucketSelector(registry, bucketConfigMap.get(registryConfig.bucketConfigName).get),
+            new BucketSelector(registry, bucketConfigMap.get(registryConfig.bucketConfigName).get.asInstanceOf[BucketingConfig]),
             utcTimeProviderMap.get(registryConfig.utcTimeProviderName).get,
             parallelServiceExecutorConfigMap.get(registryConfig.parallelServiceExecutorName).get))
         }
       }
+      println("Creating DynamicMahaServiceConfigImpl")
       new DynamicMahaServiceConfigImpl(dependencyTree, objectNameMap.toMap, resultMap, mahaRequestLogWriter, curatorMap)
     }
     mahaServiceConfig
@@ -547,6 +602,7 @@ object MahaServiceConfig {
 
   def validateReferenceByName(config: JsonMahaServiceConfig): MahaConfigResult[Boolean] = {
     //do some validation
+    println("config: " + config.parallelServiceExecutorConfigMap)
     val registryJsonConfigMap = config.registryMap
     val errorList = new mutable.HashSet[MahaServiceError]
 
