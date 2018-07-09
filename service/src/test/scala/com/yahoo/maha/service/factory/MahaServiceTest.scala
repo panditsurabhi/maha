@@ -6,7 +6,7 @@ import java.nio.charset.StandardCharsets
 import java.util
 import java.util.UUID
 
-import com.netflix.config.{DynamicIntProperty, DynamicPropertyFactory, DynamicStringProperty}
+import com.netflix.config._
 import com.yahoo.maha.core.bucketing.BucketSelector
 import com.yahoo.maha.service.{DynamicMahaServiceConfig, DynamicWrapper, MahaServiceConfig}
 import com.yahoo.maha.service.config.JsonMahaServiceConfig
@@ -935,7 +935,7 @@ class MahaServiceTest extends BaseFactoryTest {
                         |      "erBucket": {
                         |         "factoryClass": "com.yahoo.maha.service.factory.DefaultBucketingConfigFactory",
                         |         "config": [{
-                        |	  "cube": "student_performance",
+                        |	  "cube": "performance_stats",
                         |		"internal": [{
                         |			"revision": 0,
                         |      "percent": 10
@@ -945,10 +945,10 @@ class MahaServiceTest extends BaseFactoryTest {
                         |    }],
                         |		"external": [{
                         |			"revision": 0,
-                        |      "percent": "%D%(student_performance.external.rev0.percent, 90)"
+                        |      "percent": "%D%(performance_stats.external.rev0.percent, 90)"
                         |		}, {
                         |      "revision": 1,
-                        |      "percent": "%D%(student_performance.external.rev1.percent, 10)"
+                        |      "percent": "%D%(performance_stats.external.rev1.percent, 10)"
                         |		}],
                         |    "dryRun": [{
                         |			"revision": 0,
@@ -966,7 +966,7 @@ class MahaServiceTest extends BaseFactoryTest {
                         |      "irBucket": {
                         |         "factoryClass": "com.yahoo.maha.service.factory.DefaultBucketingConfigFactory",
                         |         "config": [{
-                        |	  "cube": "student_performance",
+                        |	  "cube": "performance_stats",
                         |		"internal": [{
                         |			"revision": 0,
                         |      "percent": 10
@@ -1050,30 +1050,42 @@ class MahaServiceTest extends BaseFactoryTest {
     System.setProperty("archaius.fixedDelayPollingScheduler.delayMills", "1000")
     val dynamicMahaServiceConfig = DynamicMahaServiceConfig.fromJson(jsonString.getBytes(StandardCharsets.UTF_8))
     println(dynamicMahaServiceConfig)
-    println(dynamicMahaServiceConfig.toOption.get.registry.get("er").get.bucketSelector.getBucketingConfig.getConfig("student_performance").get.externalBucketPercentage)
+    println("Bucketing config: " + dynamicMahaServiceConfig.toOption.get.registry.get("er").get.bucketSelector.getBucketingConfig.getConfig("performance_stats").get.externalBucketPercentage)
 
+    val registryConfig = dynamicMahaServiceConfig.toOption.get.registry.get("er").get
 
-    val s: DynamicIntProperty = DynamicPropertyFactory.getInstance()
-      .getIntProperty("student_performance.external.rev0.percent", 0)
-    s.addCallback(new Runnable {
+    val bucketPercent: DynamicIntProperty = DynamicPropertyFactory.getInstance()
+      .getIntProperty("performance_stats.external.rev0.percent", 0)
+    val druidTimeout: DynamicIntProperty = DynamicPropertyFactory.getInstance()
+      .getIntProperty("druid.read.timeout", 0)
+
+    def getCallback(dynamicProperty: DynamicProperty): Runnable = {
+      val callbackImpl = new Runnable {
         override def run(): Unit = {
-          println("Bucket percent changed: " + s)
-          val jsonMahaServiceConfigResult: ValidationNel[MahaServiceError, JsonMahaServiceConfig] =
-            fromJSON[JsonMahaServiceConfig](parse(new String(jsonString.getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8))).leftMap {
-              nel => nel.map(err => JsonParseError(err.toString))
-            }
-
-          val jsonMahaConfig = jsonMahaServiceConfigResult.toOption.get
-          val bucketConfigMapResult = MahaServiceConfig.initBucketingConfig(jsonMahaConfig.bucketingConfigMap)
-          println(bucketConfigMapResult.toOption.get.get("er").get.getConfig("student_performance").get.externalBucketPercentage)
-          val newBucketSelector = new BucketSelector(dynamicMahaServiceConfig.toOption.get.registry.get("er").get.registry, bucketConfigMapResult.toOption.get.get("er").get)
-          val currentValue = dynamicMahaServiceConfig.toOption.get.registry.get("er").get.bucketSelector
-          currentValue.getClass.getField(DynamicWrapper.CURRENT_OBJECT).set(currentValue, newBucketSelector)
-          
+          val dependentObjectNames: List[String] = dynamicMahaServiceConfig.toOption.get.getDependentObjectNames(dynamicProperty.getName)
+          dependentObjectNames.foreach(dependentObjectName => {
+            val updatedObject = DynamicMahaServiceConfig.createObject(jsonString.getBytes(StandardCharsets.UTF_8), dependentObjectName).get
+            println("Updated object: " + updatedObject)
+            val currentValue = registryConfig.getCurrentObject(updatedObject)
+            println("Current class: " + currentValue.getClass.getName + " Updated class: " + updatedObject.getClass)
+            currentValue.getClass.getField(DynamicWrapper.CURRENT_OBJECT).set(currentValue, updatedObject)
+          })
         }
-      })
-    println(s.get())
-    Thread.sleep(3000)
+      }
+      callbackImpl
+    }
+    bucketPercent.addCallback(getCallback(bucketPercent.getDynamicProperty))
+    druidTimeout.addCallback(getCallback(druidTimeout.getDynamicProperty))
+
+    println(bucketPercent.get())
+    Thread.sleep(10000)
+    println(bucketPercent.get())
+    Thread.sleep(10000)
+    println(bucketPercent.get())
+    Thread.sleep(10000)
+    println(bucketPercent.get())
+    Thread.sleep(10000)
+    println(bucketPercent.get())
 
   }
 

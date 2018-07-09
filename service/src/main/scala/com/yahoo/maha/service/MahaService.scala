@@ -3,17 +3,18 @@
 package com.yahoo.maha.service
 
 
-import java.lang.reflect.Modifier
+import java.lang.reflect.{Modifier, Type}
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.Callable
 
 import net.bytebuddy.implementation.bind.annotation.FieldProxy
 import com.google.common.io.Closer
-import com.yahoo.maha.core._
-import com.yahoo.maha.core.bucketing.{BucketParams, BucketSelector, BucketingConfig}
-import com.yahoo.maha.core.query._
+import com.yahoo.maha.core.{UTCTimeProvider, _}
+import com.yahoo.maha.core.bucketing.{BucketParams, BucketSelector, BucketingConfig, DefaultBucketingConfig}
+import com.yahoo.maha.core.query.{QueryExecutorContext, QueryPipelineFactory, _}
 import com.yahoo.maha.core.registry.{DimensionRegistrationFactory, FactRegistrationFactory, Registry, RegistryBuilder}
 import com.yahoo.maha.core.request.ReportingRequest
+import com.yahoo.maha.executor.druid.DruidQueryExecutor
 import com.yahoo.maha.log.MahaRequestLogWriter
 import com.yahoo.maha.parrequest2.future.{ParRequest, ParallelServiceExecutor}
 import com.yahoo.maha.parrequest2.{GeneralError, ParCallable}
@@ -49,6 +50,7 @@ import scalaz.syntax.validation._
 import scalaz.{Failure, ValidationNel, _}
 import net.bytebuddy.matcher.ElementMatchers._
 import net.bytebuddy.matcher.ElementMatchers.not
+
 import collection.JavaConverters._
 
 
@@ -56,7 +58,39 @@ import collection.JavaConverters._
 /**
  * Created by hiral on 5/26/17.
  */
-case class RegistryConfig(name: String, registry: Registry, queryPipelineFactory: QueryPipelineFactory, queryExecutorContext: QueryExecutorContext, bucketSelector: BucketSelector, utcTimeProvider: UTCTimeProvider, parallelServiceExecutor: ParallelServiceExecutor)
+case class RegistryConfig(name: String, registry: Registry, queryPipelineFactory: QueryPipelineFactory, queryExecutorContext: QueryExecutorContext, bucketSelector: BucketSelector, utcTimeProvider: UTCTimeProvider, parallelServiceExecutor: ParallelServiceExecutor) {
+  def getCurrentObject(obj: AnyRef): Object = {
+    /*val REGISTRY = classOf[Registry]
+    val QUERY_PIPELINE_FACTORY = classOf[QueryPipelineFactory]
+    val QUERY_EXECUTOR_CONTEXT = classOf[QueryExecutorContext]
+    val BUCKET_SELECTOR = classOf[DefaultBucketingConfig]
+    val UTC_TIME_PROVIDER = classOf[UTCTimeProvider]
+    val PAR_SERVICE_EXECUTOR = classOf[ParallelServiceExecutor]
+    case REGISTRY => registry
+    case QUERY_PIPELINE_FACTORY => queryPipelineFactory
+    case QUERY_EXECUTOR_CONTEXT => queryExecutorContext
+    case BUCKET_SELECTOR => bucketSelector
+    case UTC_TIME_PROVIDER => utcTimeProvider
+    case PAR_SERVICE_EXECUTOR => parallelServiceExecutor
+    case _ => throw new IllegalArgumentException(s"Unknown object type: $objectType")
+      */
+    val result = {
+      /*obj match {
+        case BUCKET_SELECTOR => bucketSelector
+        case _ => throw new IllegalArgumentException(s"Unknown object type: $obj")
+      }*/
+      if (obj.isInstanceOf[BucketSelector]) {
+        bucketSelector
+      } else if (obj.isInstanceOf[DruidQueryExecutor]) {
+        queryExecutorContext
+      } else {
+        throw new IllegalArgumentException(s"Unknown object type: $obj")
+      }
+    }
+  result
+  }
+}
+
 
 case class MahaServiceConfig(registry: Map[String, RegistryConfig], mahaRequestLogWriter: MahaRequestLogWriter, curatorMap: Map[String, Curator])
 
@@ -376,7 +410,7 @@ object DynamicWrapper {
   val CURRENT_OBJECT = "currentObject"
 
   def getDynamicClass(obj: Object) = {
-    println("Class: " + obj.getClass)
+    println("Getting Dynamic Class for : " + obj.getClass)
     new ByteBuddy()
       .subclass(obj.getClass, ConstructorStrategy.Default.DEFAULT_CONSTRUCTOR)
       .defineField(CURRENT_OBJECT, obj.getClass, Modifier.PUBLIC)
@@ -390,18 +424,37 @@ object DynamicWrapper {
 
 object DynamicMahaServiceConfig {
 
+  def getDynamicObject(obj: Object): Object = {
+    val dynamicClass = DynamicWrapper.getDynamicClass(obj)
+    val dynamicInstance = dynamicClass.newInstance()
+    dynamicClass.getField(DynamicWrapper.CURRENT_OBJECT).set(dynamicInstance, obj)
+    dynamicInstance
+  }
+
   def getDynamicObjects(namedObjectMap: MahaServiceConfig.MahaConfigResult[Map[String, Object]]): MahaServiceConfig.MahaConfigResult[Map[String, Object]] = {
     val dynamicObjectMap = new mutable.HashMap[String, Object]()
     namedObjectMap.foreach(map => {
       for ((name, obj) <- map) {
-        val dynamicClass = DynamicWrapper.getDynamicClass(obj)
-        val dynamicInstance = dynamicClass.newInstance()
-        dynamicClass.getField(DynamicWrapper.CURRENT_OBJECT).set(dynamicInstance, obj)
+        val dynamicInstance = getDynamicObject(obj)
         dynamicObjectMap.+=((name, dynamicInstance))
       }
     })
     dynamicObjectMap.toMap.successNel[MahaServiceError]
   }
+
+  def createObject(ba: Array[Byte], objectName: String): Option[Object] = {
+    val createdObject = {
+      val config = DynamicMahaServiceConfig.fromJson(ba).toOption.get
+      if (objectName == "erbucket") {
+        val registry = config.getObjectByName("er").get.asInstanceOf[Registry]
+        Some(new BucketSelector(registry, config.getObjectByName(objectName).get.asInstanceOf[BucketingConfig]))
+      } else {
+        config.getObjectByName(objectName)
+      }
+    }
+    createdObject
+  }
+
 
   def fromJson(ba: Array[Byte]): MahaServiceConfig.MahaConfigResult[DynamicMahaServiceConfigImpl] = {
     val json = {
@@ -417,7 +470,6 @@ object DynamicMahaServiceConfig {
       nel => nel.map(err => JsonParseError(err.toString))
     }
 
-    println("jsonMahaServiceConfigResult: "  + jsonMahaServiceConfigResult)
     val mahaServiceConfig = for {
       jsonMahaServiceConfig <- jsonMahaServiceConfigResult
       validationResult <- validateReferenceByName(jsonMahaServiceConfig)
@@ -440,9 +492,12 @@ object DynamicMahaServiceConfig {
       parallelServiceExecutorConfigMap.foreach(f => objectNameMap.put(f._1, f._2))
       curatorMap.foreach(f => objectNameMap.put(f._1, f._2))
 
-      println("Crated named map")
       val dependencyTree = createDependencyTree(jsonMahaServiceConfig, objectNameMap.toMap)
-      println("Crated dependencyTree")
+      println(s"\nDependencyTree:")
+      for ((name, dependents) <- dependencyTree) {
+        println(s"$name -> $dependents")
+      }
+      println()
       val resultMap: Map[String, RegistryConfig] = registryMap.map {
         case (regName, registry) => {
           val registryConfig = jsonMahaServiceConfig.registryMap.get(regName.toLowerCase).get
@@ -457,23 +512,30 @@ object DynamicMahaServiceConfig {
             case (_, executor) =>
               queryExecutorContext.register(executor)
           }
+
+          val bucketSelector = new BucketSelector(registry, bucketConfigMap.get(registryConfig.bucketConfigName).get.asInstanceOf[BucketingConfig])
+          val bucketSelectDynamic = getDynamicObject(bucketSelector).asInstanceOf[BucketSelector]
           (regName -> RegistryConfig(regName,
             registry,
             new DefaultQueryPipelineFactory(),
             queryExecutorContext,
-            new BucketSelector(registry, bucketConfigMap.get(registryConfig.bucketConfigName).get.asInstanceOf[BucketingConfig]),
+            bucketSelectDynamic,
             utcTimeProviderMap.get(registryConfig.utcTimeProviderName).get,
             parallelServiceExecutorConfigMap.get(registryConfig.parallelServiceExecutorName).get))
         }
       }
-      println("Creating DynamicMahaServiceConfigImpl")
       new DynamicMahaServiceConfigImpl(dependencyTree, objectNameMap.toMap, resultMap, mahaRequestLogWriter, curatorMap)
     }
     mahaServiceConfig
   }
 
   def createDependencyTree(config: JsonMahaServiceConfig, objectNameMap: Map[String, Object]): Map[String, List[String]] = {
-    println("Object Name Map: " + objectNameMap)
+    println("\nObject Name Map: ")
+    for ((name, obj) <- objectNameMap) {
+      println(s"$name -> $obj")
+    }
+    println()
+
     val dependencyTree = new mutable.HashMap[String, List[String]] ()
 
     def updateTree(objectName: String, jValue: json4s.JValue) = {
@@ -481,12 +543,10 @@ object DynamicMahaServiceConfig {
       findLeafNodes(jValue, leaves)
       val filtered = leaves.filter(l => l.isInstanceOf[JString] && l.asInstanceOf[JString].s.contains("%D%"))
       filtered.foreach(dynamicKeyCol => {
-        //println(s"Key: $objectName Col: $dynamicKeyCol")
         val configStr = dynamicKeyCol.asInstanceOf[JString].s
         val dynamicConfigKey = configStr
           .replaceAll("\\%D\\%\\(", "")
           .substring(0, configStr.indexOf(",") - 4)
-        //println(dynamicConfigKey)
         require(objectNameMap.contains(objectName), s"No object with name: $objectName present in MahaServiceConfig")
         dependencyTree.+=((dynamicConfigKey, List(objectName)))
       })

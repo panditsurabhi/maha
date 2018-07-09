@@ -27,6 +27,8 @@ case class BucketParams(userInfo: UserInfo, dryRunRevision: Option[Int] = None, 
 class BucketSelector(registry: Registry, bucketingConfig: BucketingConfig) extends Logging {
   val random = new scala.util.Random
 
+  def this() {this(null, null)}
+
   def getBucketingConfig = bucketingConfig
 
   def selectBuckets(cube: String, requestParams: BucketParams): Try[BucketSelected] = {
